@@ -129,7 +129,6 @@ def process_world_cup_data(matches):
                 }
             
             results.append({
-                "Date": date_str,
                 "Kickoff (UTC)": dt_utc.strftime("%Y-%m-%d %H:%M"),
                 "Match": f"{team1} vs {team2}",
                 "Stadium/City": ground,
@@ -215,18 +214,29 @@ with tab2:
     st.write("Analyze the Wet Bulb Globe Temperature (WBGT) during kickoff times of the 2026 FIFA World Cup matches played so far.")
     
     if st.button("Fetch World Cup Data"):
+        # Clear the cache to force a fresh fetch
+        get_world_cup_matches.clear()
+        process_world_cup_data.clear()
+        
         with st.spinner("Fetching matches and calculating WBGT (this may take a minute or two)..."):
             matches = get_world_cup_matches()
             if not matches:
                 st.error("Could not fetch the match schedule. Is the tournament URL correct?")
             else:
                 df_wc, df_stations = process_world_cup_data(matches)
-                if df_wc.empty:
-                    st.info("No matches have been played yet or no data could be fetched.")
-                else:
-                    st.dataframe(df_wc)
-                    st.caption("Source: Meteostat and its data providers. Match schedule from openfootball.")
-                    
-                    st.subheader("Weather Stations Used")
-                    st.write("Weather data is fetched from the nearest active weather station to the stadium at the time of the kickoff.")
-                    st.dataframe(df_stations)
+                st.session_state['wc_data'] = df_wc
+                st.session_state['wc_stations'] = df_stations
+
+    if 'wc_data' in st.session_state and 'wc_stations' in st.session_state:
+        df_wc = st.session_state['wc_data']
+        df_stations = st.session_state['wc_stations']
+        
+        if df_wc.empty:
+            st.info("No matches have been played yet or no data could be fetched.")
+        else:
+            st.dataframe(df_wc)
+            st.caption("Source: Meteostat and its data providers. Match schedule from openfootball.")
+            
+            st.subheader("Weather Stations Used")
+            st.write("Weather data is fetched from the nearest active weather station to the stadium at the time of the kickoff.")
+            st.dataframe(df_stations)
