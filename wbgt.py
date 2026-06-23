@@ -235,10 +235,12 @@ def process_upcoming_world_cup_data(matches):
 
 st.title("WBGT Calculator")
 
+st.info("**Disclaimer:** This tool uses the Australian Bureau of Meteorology's simplified empirical estimation for WBGT based only on 2m temperature and relative humidity. It is an empirical screening estimate (no radiation/wind term), intended for moderate-to-warm outdoor conditions; it is not a substitute for a physically-based calculation where definitive accuracy matters.")
+
 tab1, tab2 = st.tabs(["Custom Location", "FIFA World Cup 2026"])
 
 with tab1:
-    st.write("Calculate the Wet Bulb Globe Temperature (WBGT) using Meteostat and Thermofeel.")
+    st.write("Calculate the Wet Bulb Globe Temperature (WBGT) using weather data from Meteostat.")
 
     location_input = st.text_input("Enter Location (e.g., London, UK):", "London, UK")
 
