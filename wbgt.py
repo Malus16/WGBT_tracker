@@ -1,4 +1,7 @@
 import streamlit as st
+
+st.set_page_config(layout="wide", page_title="WBGT Calculator")
+
 import pandas as pd
 from datetime import datetime, time, timedelta
 import geopy.geocoders
@@ -47,6 +50,19 @@ def calculate_wbgt_celsius(temp_c, rh):
     # calculate_wbgt_simple expects numpy arrays or single floats, and returns the WBGT in Kelvin
     wbgt_k = thermofeel.calculate_wbgt_simple(temp_k, rh)
     return wbgt_k - 273.15
+
+def color_wbgt(val):
+    try:
+        val = float(val)
+        if val > 32:
+            return 'background-color: #ff4b4b; color: white' # Red
+        elif val > 28:
+            return 'background-color: #ffa421; color: white' # Orange
+        elif val > 25:
+            return 'background-color: #ffe83f; color: black' # Yellow
+    except:
+        pass
+    return ''
 
 @st.cache_data
 def get_world_cup_matches():
@@ -203,7 +219,13 @@ with tab1:
                                 df['WBGT (°C)'] = calculate_wbgt_celsius(df[temp_col], df[rh_col])
                                 
                                 st.subheader("Results")
-                                st.dataframe(df[[temp_col, rh_col, 'WBGT (°C)']].rename(columns={temp_col: 'Temperature (°C)', rh_col: 'Relative Humidity (%)'}))
+                                df_display = df[[temp_col, rh_col, 'WBGT (°C)']].rename(columns={temp_col: 'Temperature (°C)', rh_col: 'Relative Humidity (%)'})
+                                styled_df = df_display.style.format({
+                                    "Temperature (°C)": "{:.1f}",
+                                    "Relative Humidity (%)": "{:.0f}",
+                                    "WBGT (°C)": "{:.1f}"
+                                }).map(color_wbgt, subset=['WBGT (°C)'])
+                                st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600)
                                 
                                 st.line_chart(df['WBGT (°C)'])
                                 
@@ -234,9 +256,15 @@ with tab2:
         if df_wc.empty:
             st.info("No matches have been played yet or no data could be fetched.")
         else:
-            st.dataframe(df_wc)
+            df_wc = df_wc.sort_values("Kickoff (UTC)", ascending=True).reset_index(drop=True)
+            styled_wc = df_wc.style.format({
+                "Temperature (°C)": "{:.1f}",
+                "Relative Humidity (%)": "{:.0f}",
+                "WBGT (°C)": "{:.1f}"
+            }).map(color_wbgt, subset=['WBGT (°C)'])
+            st.dataframe(styled_wc, use_container_width=True, hide_index=True, height=800)
             st.caption("Source: Meteostat and its data providers. Match schedule from openfootball.")
             
             st.subheader("Weather Stations Used")
             st.write("Weather data is fetched from the nearest active weather station to the stadium at the time of the kickoff.")
-            st.dataframe(df_stations)
+            st.dataframe(df_stations, use_container_width=True, hide_index=True, height=600)
