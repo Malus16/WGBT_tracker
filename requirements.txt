@@ -1,0 +1,6 @@
+streamlit
+pandas
+geopy
+meteostat
+thermofeel
+requests
