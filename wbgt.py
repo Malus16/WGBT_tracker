@@ -60,6 +60,7 @@ def get_world_cup_matches():
 @st.cache_data
 def process_world_cup_data(matches):
     results = []
+    stations_used = {}
     # use today's date and a generous future limit for matches currently going on or finished
     now = datetime.utcnow()
     
@@ -117,6 +118,16 @@ def process_world_cup_data(matches):
             
             wbgt_c = calculate_wbgt_celsius(temp, rhum)
             
+            if ground not in stations_used:
+                station_row = closest_stations.iloc[0]
+                stations_used[ground] = {
+                    "Stadium/City": ground,
+                    "Station ID": station_id,
+                    "Station Name": station_row.get('name', 'Unknown'),
+                    "Station Latitude": station_row.get('latitude', lat),
+                    "Station Longitude": station_row.get('longitude', lon)
+                }
+            
             results.append({
                 "Date": date_str,
                 "Kickoff (UTC)": dt_utc.strftime("%Y-%m-%d %H:%M"),
@@ -127,7 +138,8 @@ def process_world_cup_data(matches):
                 "WBGT (°C)": round(float(wbgt_c), 2)
             })
             
-    return pd.DataFrame(results)
+    df_stations = pd.DataFrame(list(stations_used.values()))
+    return pd.DataFrame(results), df_stations
 
 st.title("WBGT Calculator")
 
@@ -195,6 +207,9 @@ with tab1:
                                 st.dataframe(df[[temp_col, rh_col, 'WBGT (°C)']].rename(columns={temp_col: 'Temperature (°C)', rh_col: 'Relative Humidity (%)'}))
                                 
                                 st.line_chart(df['WBGT (°C)'])
+                                
+                                attribution = getattr(data, 'attribution', "Meteostat and its data providers")
+                                st.caption(f"Source: {attribution}")
 
 with tab2:
     st.write("Analyze the Wet Bulb Globe Temperature (WBGT) during kickoff times of the 2026 FIFA World Cup matches played so far.")
@@ -205,8 +220,13 @@ with tab2:
             if not matches:
                 st.error("Could not fetch the match schedule. Is the tournament URL correct?")
             else:
-                df_wc = process_world_cup_data(matches)
+                df_wc, df_stations = process_world_cup_data(matches)
                 if df_wc.empty:
                     st.info("No matches have been played yet or no data could be fetched.")
                 else:
                     st.dataframe(df_wc)
+                    st.caption("Source: Meteostat and its data providers. Match schedule from openfootball.")
+                    
+                    st.subheader("Weather Stations Used")
+                    st.write("Weather data is fetched from the nearest active weather station to the stadium at the time of the kickoff.")
+                    st.dataframe(df_stations)
