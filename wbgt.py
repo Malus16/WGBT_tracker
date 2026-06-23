@@ -156,6 +156,83 @@ def process_world_cup_data(matches):
     df_stations = pd.DataFrame(list(stations_used.values()))
     return pd.DataFrame(results), df_stations
 
+@st.cache_data(ttl=3600)
+def process_upcoming_world_cup_data(matches):
+    results = []
+    now = datetime.utcnow()
+    five_days_from_now = now + timedelta(days=5)
+    
+    for match in matches:
+        date_str = match.get("date")
+        time_full_str = match.get("time") # e.g. "13:00 UTC-6"
+        ground = match.get("ground")
+        team1 = match.get("team1")
+        team2 = match.get("team2")
+        
+        if not date_str or not time_full_str or not ground:
+            continue
+            
+        # Parse time and convert to UTC
+        match_re = re.match(r'(\d{2}:\d{2})\s*UTC([+-]\d+)', time_full_str)
+        if match_re:
+            time_str, offset = match_re.groups()
+            dt_local = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            offset_hours = int(offset)
+            dt_utc = dt_local - timedelta(hours=offset_hours)
+        else:
+            try:
+                dt_local = datetime.strptime(f"{date_str} {time_full_str}", "%Y-%m-%d %H:%M")
+                dt_utc = dt_local
+            except:
+                continue
+                
+        # Only process upcoming matches within 5 days
+        if dt_utc <= now or dt_utc > five_days_from_now:
+            continue
+            
+        lat, lon = get_location_coordinates(ground)
+        if lat is None or lon is None:
+            continue
+            
+        # Fetch forecast from Open-Meteo
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": "temperature_2m,relative_humidity_2m",
+            "models": "best_match"
+        }
+        
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                times = data.get("hourly", {}).get("time", [])
+                temps = data.get("hourly", {}).get("temperature_2m", [])
+                rhums = data.get("hourly", {}).get("relative_humidity_2m", [])
+                
+                target_time_str = dt_utc.strftime("%Y-%m-%dT%H:00")
+                
+                if target_time_str in times:
+                    idx = times.index(target_time_str)
+                    temp = temps[idx]
+                    rhum = rhums[idx]
+                    
+                    if temp is not None and rhum is not None:
+                        wbgt_c = calculate_wbgt_celsius(temp, rhum)
+                        results.append({
+                            "Kickoff (UTC)": dt_utc.strftime("%Y-%m-%d %H:%M"),
+                            "Match": f"{team1} vs {team2}",
+                            "Stadium/City": ground,
+                            "Temperature (°C)": temp,
+                            "Relative Humidity (%)": rhum,
+                            "WBGT (°C)": round(float(wbgt_c), 2)
+                        })
+        except Exception as e:
+            continue
+            
+    return pd.DataFrame(results)
+
 st.title("WBGT Calculator")
 
 tab1, tab2 = st.tabs(["Custom Location", "FIFA World Cup 2026"])
@@ -233,9 +310,9 @@ with tab1:
                                 st.caption(f"Source: {attribution}")
 
 with tab2:
-    st.write("Analyze the Wet Bulb Globe Temperature (WBGT) during kickoff times of the 2026 FIFA World Cup matches played so far.")
+    st.write("Analyze the Wet Bulb Globe Temperature (WBGT) for the 2026 FIFA World Cup matches.")
     
-    if st.button("Fetch World Cup Data"):
+    if st.button("Fetch Newest Data"):
         # Clear the cache to force a fresh fetch
         get_world_cup_matches.clear()
         process_world_cup_data.clear()
@@ -246,25 +323,44 @@ with tab2:
                 st.error("Could not fetch the match schedule. Is the tournament URL correct?")
             else:
                 df_wc, df_stations = process_world_cup_data(matches)
+                df_forecast = process_upcoming_world_cup_data(matches)
                 st.session_state['wc_data'] = df_wc
                 st.session_state['wc_stations'] = df_stations
+                st.session_state['wc_forecast'] = df_forecast
 
     if 'wc_data' in st.session_state and 'wc_stations' in st.session_state:
         df_wc = st.session_state['wc_data']
         df_stations = st.session_state['wc_stations']
+        df_forecast = st.session_state.get('wc_forecast', pd.DataFrame())
         
-        if df_wc.empty:
-            st.info("No matches have been played yet or no data could be fetched.")
-        else:
-            df_wc = df_wc.sort_values("Kickoff (UTC)", ascending=True).reset_index(drop=True)
-            styled_wc = df_wc.style.format({
-                "Temperature (°C)": "{:.1f}",
-                "Relative Humidity (%)": "{:.0f}",
-                "WBGT (°C)": "{:.1f}"
-            }).map(color_wbgt, subset=['WBGT (°C)'])
-            st.dataframe(styled_wc, use_container_width=True, hide_index=True, height=800)
-            st.caption("Source: Meteostat and its data providers. Match schedule from openfootball.")
-            
+        wc_tab1, wc_tab2 = st.tabs(["Played Matches", "Upcoming Matches"])
+        
+        with wc_tab1:
+            if df_wc.empty:
+                st.info("No matches have been played yet or no data could be fetched.")
+            else:
+                df_wc = df_wc.sort_values("Kickoff (UTC)", ascending=True).reset_index(drop=True)
+                styled_wc = df_wc.style.format({
+                    "Temperature (°C)": "{:.1f}",
+                    "Relative Humidity (%)": "{:.0f}",
+                    "WBGT (°C)": "{:.1f}"
+                }).map(color_wbgt, subset=['WBGT (°C)'])
+                st.dataframe(styled_wc, use_container_width=True, hide_index=True, height=800)
+                st.caption("Source: Meteostat and its data providers. Match schedule from openfootball.")
+                
             st.subheader("Weather Stations Used")
-            st.write("Weather data is fetched from the nearest active weather station to the stadium at the time of the kickoff.")
+            st.write("For played matches, weather data is fetched from the nearest active weather station to the stadium at the time of the kickoff.")
             st.dataframe(df_stations, use_container_width=True, hide_index=True, height=600)
+            
+        with wc_tab2:
+            if df_forecast.empty:
+                st.info("No matches scheduled in the next 5 days, or forecast data unavailable.")
+            else:
+                df_forecast = df_forecast.sort_values("Kickoff (UTC)", ascending=True).reset_index(drop=True)
+                styled_forecast = df_forecast.style.format({
+                    "Temperature (°C)": "{:.1f}",
+                    "Relative Humidity (%)": "{:.0f}",
+                    "WBGT (°C)": "{:.1f}"
+                }).map(color_wbgt, subset=['WBGT (°C)'])
+                st.dataframe(styled_forecast, use_container_width=True, hide_index=True, height=800)
+                st.caption("Source: Weather forecast data by [Open-Meteo.com](https://open-meteo.com/) (CC-BY 4.0). Match schedule from openfootball.")
