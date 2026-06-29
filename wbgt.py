@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="WBGT Calculator")
+st.set_page_config(layout="centered", page_title="WBGT Calculator")
 
 import pandas as pd
 from datetime import datetime, time, timedelta
@@ -315,11 +315,20 @@ def process_upcoming_world_cup_data(matches):
 
 st.title("WBGT Calculator")
 
-st.info("**Disclaimer:** This tool uses the Australian Bureau of Meteorology's simplified empirical estimation for WBGT based only on 2m temperature and relative humidity. It is an empirical screening estimate (no radiation/wind term), intended for moderate-to-warm outdoor conditions; it is not a substitute for a physically-based calculation where definitive accuracy matters.")
+st.markdown("""
+<style>
+    .block-container {
+        max-width: 1100px;
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 tab1, tab2, tab3 = st.tabs(["Custom Location", "FIFA World Cup 2026", "Beta Advanced Calculator"])
 
 with tab1:
+    st.info("**Disclaimer:** This tool uses the Australian Bureau of Meteorology's simplified empirical estimation for WBGT based only on 2m temperature and relative humidity. It is an empirical screening estimate (no radiation/wind term), intended for moderate-to-warm outdoor conditions; it is not a substitute for a physically-based calculation where definitive accuracy matters.")
     st.write("Calculate the Wet Bulb Globe Temperature (WBGT) using weather data from Meteostat.")
 
     location_input = st.text_input("Enter Location (e.g., London, UK):", "London, UK")
@@ -384,7 +393,7 @@ with tab1:
                                     "Relative Humidity (%)": "{:.0f}",
                                     "WBGT (°C)": "{:.1f}"
                                 }).map(color_wbgt, subset=['WBGT (°C)'])
-                                st.dataframe(styled_df, width='stretch', hide_index=True, height=600)
+                                st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600)
                                 
                                 st.line_chart(df['WBGT (°C)'])
                                 
@@ -392,6 +401,7 @@ with tab1:
                                 st.caption(f"Source: {attribution}")
 
 with tab2:
+    st.info("**Disclaimer:** This tool uses the Australian Bureau of Meteorology's simplified empirical estimation for WBGT based only on 2m temperature and relative humidity. It is an empirical screening estimate (no radiation/wind term), intended for moderate-to-warm outdoor conditions; it is not a substitute for a physically-based calculation where definitive accuracy matters.")
     st.write("Analyze the Wet Bulb Globe Temperature (WBGT) for the 2026 FIFA World Cup matches.")
     
     if st.button("Fetch Newest Data"):
@@ -427,12 +437,12 @@ with tab2:
                     "Relative Humidity (%)": "{:.0f}",
                     "WBGT (°C)": "{:.1f}"
                 }).map(color_wbgt, subset=['WBGT (°C)'])
-                st.dataframe(styled_wc, width='stretch', hide_index=True, height=800)
+                st.dataframe(styled_wc, use_container_width=True, hide_index=True, height=800)
                 st.caption("Source: Meteostat and its data providers. Match schedule from openfootball.")
                 
             st.subheader("Weather Stations Used")
             st.write("For played matches, weather data is fetched from the nearest active weather station to the stadium at the time of the kickoff.")
-            st.dataframe(df_stations, width='stretch', hide_index=True, height=600)
+            st.dataframe(df_stations, use_container_width=True, hide_index=True, height=600)
             
         with wc_tab2:
             if df_forecast.empty:
@@ -444,11 +454,13 @@ with tab2:
                     "Relative Humidity (%)": "{:.0f}",
                     "WBGT (°C)": "{:.1f}"
                 }).map(color_wbgt, subset=['WBGT (°C)'])
-                st.dataframe(styled_forecast, width='stretch', hide_index=True, height=800)
+                st.dataframe(styled_forecast, use_container_width=True, hide_index=True, height=800)
                 st.caption("Source: Weather forecast data by [Open-Meteo.com](https://open-meteo.com/) (CC-BY 4.0). Match schedule from openfootball.")
 
 with tab3:
     st.write("Test the physically-based Liljegren WBGT calculation using Open-Meteo solar radiation and wind data. Compare it directly with the Simple BOM approximation.")
+    
+    st.info("**Note on Data Source:** This calculator uses Open-Meteo's gridded weather models (Analysis and Forecasts). Because it requires advanced variables like Solar Radiation—which many physical weather stations lack—it simulates the average climate over a grid cell (e.g., 2km x 2km). As a result, the data guarantees 100% availability for the physical WBGT/UTCI calculations, but may differ slightly from exact point-observations at local weather stations.")
     
     beta_loc_input = st.text_input("Enter Location:", "London, UK", key="beta_loc")
     
@@ -493,7 +505,7 @@ with tab3:
                         dnis = hourly.get("direct_normal_irradiance", [])
                         
                         df_beta = pd.DataFrame({
-                            "Time": times,
+                            "Time": pd.to_datetime(times),
                             "Temperature (°C)": temps,
                             "Relative Humidity (%)": rhums,
                             "Pressure (hPa)": pressures,
@@ -533,9 +545,29 @@ with tab3:
                             # Display
                             st.subheader("Results")
                             
+                            legend_html = """
+                            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; font-size: 0.9em;">
+                                <div style="background-color: #ffe83f; color: black; padding: 5px 10px; border-radius: 5px;">
+                                    <b>Moderate</b> (WBGT > 25.6°C | UTCI > 26°C)
+                                </div>
+                                <div style="background-color: #ffa421; color: white; padding: 5px 10px; border-radius: 5px;">
+                                    <b>Strong</b> (WBGT > 27.8°C | UTCI > 32°C)
+                                </div>
+                                <div style="background-color: #ff4b4b; color: white; padding: 5px 10px; border-radius: 5px;">
+                                    <b>Very Strong</b> (WBGT > 29.5°C | UTCI > 38°C)
+                                </div>
+                                <div style="background-color: #8b0000; color: white; padding: 5px 10px; border-radius: 5px;">
+                                    <b>Extreme</b> (WBGT > 32°C | UTCI > 46°C)
+                                </div>
+                            </div>
+                            """
+                            st.markdown(legend_html, unsafe_allow_html=True)
+                            
                             display_df = df_beta[["Time", "Temperature (°C)", "Relative Humidity (%)", "Shortwave Rad (W/m²)", "WBGT Simple (°C)", "WBGT Liljegren (°C)", "UTCI (°C)"]].copy()
                             
+                            now_utc = datetime.utcnow()
                             styled_beta = display_df.style.format({
+                                "Time": lambda t: t.strftime('%b %d, %H:%M') + ('*' if t > now_utc else ''),
                                 "Temperature (°C)": "{:.1f}",
                                 "Relative Humidity (%)": "{:.0f}",
                                 "Shortwave Rad (W/m²)": "{:.0f}",
@@ -544,11 +576,13 @@ with tab3:
                                 "UTCI (°C)": "{:.1f}"
                             }).map(color_wbgt, subset=['WBGT Simple (°C)', 'WBGT Liljegren (°C)']).map(color_utci, subset=['UTCI (°C)'])
                             
-                            st.dataframe(styled_beta, width='stretch', hide_index=True, height=600)
+                            st.dataframe(styled_beta, use_container_width=True, hide_index=True, height=600)
                             
-                            st.line_chart(df_beta.set_index("Time")[["WBGT Simple (°C)", "WBGT Liljegren (°C)", "UTCI (°C)"]])
+                            plot_df = df_beta.set_index("Time")[["WBGT Simple (°C)", "WBGT Liljegren (°C)", "UTCI (°C)"]].round(1)
+                            plot_df.index = plot_df.index.strftime('%b %d, %H:%M')
+                            st.line_chart(plot_df)
                             
-                            st.caption("Source: Data powered by Open-Meteo. WBGT and UTCI calculations via Thermofeel.")
+                            st.caption("Source: Data powered by Open-Meteo. WBGT and UTCI calculations via Thermofeel. (* Indicates forecast model data)")
                     else:
                         st.error(f"Failed to fetch data from Open-Meteo. Status code: {response.status_code}")
                 except Exception as e:
