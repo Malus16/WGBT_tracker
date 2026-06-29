@@ -11,6 +11,7 @@ import requests
 import re
 
 import time as pytime
+import numpy as np
 
 WORLD_CUP_GROUNDS = {
     'Atlanta': (33.7554, -84.4006),
@@ -51,14 +52,93 @@ def calculate_wbgt_celsius(temp_c, rh):
     wbgt_k = thermofeel.calculate_wbgt_simple(temp_k, rh)
     return wbgt_k - 273.15
 
+def calculate_advanced_indices(temp_c, rh, pres_hpa, wind_ms, sw_rad, dir_rad, dni):
+    temp_c = np.array(temp_c, dtype=float)
+    rh = np.array(rh, dtype=float)
+    pres_hpa = np.array(pres_hpa, dtype=float)
+    wind_ms = np.array(wind_ms, dtype=float)
+    sw_rad = np.array(sw_rad, dtype=float)
+    dir_rad = np.array(dir_rad, dtype=float)
+    dni = np.array(dni, dtype=float)
+    
+    temp_k = temp_c + 273.15
+    
+    # Calculate fdir: fraction of direct radiation
+    fdir = np.zeros_like(sw_rad)
+    valid_sw = sw_rad > 0
+    fdir[valid_sw] = dir_rad[valid_sw] / sw_rad[valid_sw]
+    fdir = np.clip(fdir, 0.0, 1.0)
+    
+    # Calculate cossza: cosine of solar zenith angle
+    cossza = np.zeros_like(dni)
+    valid_dni = dni > 0
+    cossza[valid_dni] = dir_rad[valid_dni] / dni[valid_dni]
+    cossza = np.clip(cossza, 0.0, 1.0)
+    
+    # 1. WBGT Liljegren
+    wbgt_k = thermofeel.calculate_wbgt_liljegren(
+        t2_k=temp_k,
+        rh=rh,
+        pressure=pres_hpa,
+        va=wind_ms,
+        ssrd=sw_rad,
+        fdir=fdir,
+        cossza=cossza
+    )
+    
+    # 2. UTCI
+    # To calculate UTCI we need MRT (Mean Radiant Temperature). We can derive MRT from the 
+    # Globe Temperature (bgt_k), which is solved internally in Liljegren's wbgt method.
+    
+    # Apply identical KNMI guards used in `thermofeel._liljegren_wbgt`
+    fdir_clamped = np.clip(fdir, 0.0, 0.9)
+    fdir_clamped = np.where(cossza < thermofeel.liljegren.CZA_MIN, 0.0, fdir_clamped)
+    
+    wind_10m = np.maximum(wind_ms, thermofeel.liljegren.MIN_WIND_10M)
+    speed_2m = thermofeel.liljegren.wind_speed_2m(wind_10m, cossza, sw_rad)
+    
+    # Solve for Globe Temperature [degC]
+    tg_c = thermofeel.liljegren.solve_globe(
+        temp_k, rh / 100.0, pres_hpa, speed_2m, sw_rad, fdir_clamped, cossza
+    )
+    bgt_k = tg_c + 273.15
+    
+    # Compute MRT
+    mrt_k = thermofeel.calculate_mrt_from_bgt(temp_k, bgt_k, wind_10m)
+    
+    # Compute Saturation Vapour Pressure for UTCI
+    ehpa = thermofeel.calculate_saturation_vapour_pressure(temp_k) * (rh / 100.0)
+    
+    # Calculate UTCI
+    utci_k = thermofeel.calculate_utci(temp_k, wind_10m, mrt_k, ehPa=ehpa)
+    
+    return wbgt_k - 273.15, utci_k - 273.15
+
 def color_wbgt(val):
     try:
         val = float(val)
         if val > 32:
+            return 'background-color: #8b0000; color: white' # Dark Red
+        elif val > 29.5:
             return 'background-color: #ff4b4b; color: white' # Red
-        elif val > 28:
+        elif val > 27.8:
             return 'background-color: #ffa421; color: white' # Orange
-        elif val > 25:
+        elif val > 25.6:
+            return 'background-color: #ffe83f; color: black' # Yellow
+    except:
+        pass
+    return ''
+
+def color_utci(val):
+    try:
+        val = float(val)
+        if val > 46:
+            return 'background-color: #8b0000; color: white' # Dark Red
+        elif val > 38:
+            return 'background-color: #ff4b4b; color: white' # Red
+        elif val > 32:
+            return 'background-color: #ffa421; color: white' # Orange
+        elif val > 26:
             return 'background-color: #ffe83f; color: black' # Yellow
     except:
         pass
@@ -125,7 +205,7 @@ def process_world_cup_data(matches):
         
         data = hourly(station_id, start_fetch, end_fetch).fetch()
         
-        if not data.empty and 'temp' in data.columns and 'rhum' in data.columns:
+        if data is not None and not data.empty and 'temp' in data.columns and 'rhum' in data.columns:
             row = data.iloc[0]
             temp = row['temp']
             rhum = row['rhum']
@@ -237,7 +317,7 @@ st.title("WBGT Calculator")
 
 st.info("**Disclaimer:** This tool uses the Australian Bureau of Meteorology's simplified empirical estimation for WBGT based only on 2m temperature and relative humidity. It is an empirical screening estimate (no radiation/wind term), intended for moderate-to-warm outdoor conditions; it is not a substitute for a physically-based calculation where definitive accuracy matters.")
 
-tab1, tab2 = st.tabs(["Custom Location", "FIFA World Cup 2026"])
+tab1, tab2, tab3 = st.tabs(["Custom Location", "FIFA World Cup 2026", "Beta Advanced Calculator"])
 
 with tab1:
     st.write("Calculate the Wet Bulb Globe Temperature (WBGT) using weather data from Meteostat.")
@@ -366,3 +446,110 @@ with tab2:
                 }).map(color_wbgt, subset=['WBGT (°C)'])
                 st.dataframe(styled_forecast, width='stretch', hide_index=True, height=800)
                 st.caption("Source: Weather forecast data by [Open-Meteo.com](https://open-meteo.com/) (CC-BY 4.0). Match schedule from openfootball.")
+
+with tab3:
+    st.write("Test the physically-based Liljegren WBGT calculation using Open-Meteo solar radiation and wind data. Compare it directly with the Simple BOM approximation.")
+    
+    beta_loc_input = st.text_input("Enter Location:", "London, UK", key="beta_loc")
+    
+    bc1, bc2 = st.columns(2)
+    with bc1:
+        beta_start = st.date_input("Start Date", datetime.today().date() - timedelta(days=7), key="beta_start")
+    with bc2:
+        beta_end = st.date_input("End Date", datetime.today().date(), key="beta_end")
+        
+    if st.button("Calculate Advanced WBGT", key="beta_btn"):
+        with st.spinner("Fetching solar and meteorological data from Open-Meteo..."):
+            lat, lon = get_location_coordinates(beta_loc_input)
+            if lat is None or lon is None:
+                st.error("Could not find coordinates for the given location.")
+            else:
+                st.success(f"Location found: Latitude {lat}, Longitude {lon}")
+                
+                # Fetch from Open-Meteo forecast API (supports historical dates)
+                url = "https://api.open-meteo.com/v1/forecast"
+                params = {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "start_date": beta_start.strftime("%Y-%m-%d"),
+                    "end_date": beta_end.strftime("%Y-%m-%d"),
+                    "hourly": "temperature_2m,relative_humidity_2m,surface_pressure,windspeed_10m,shortwave_radiation,direct_radiation,direct_normal_irradiance",
+                    "timezone": "auto"
+                }
+                
+                try:
+                    response = requests.get(url, params=params, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        hourly = data.get("hourly", {})
+                        
+                        times = hourly.get("time", [])
+                        temps = hourly.get("temperature_2m", [])
+                        rhums = hourly.get("relative_humidity_2m", [])
+                        pressures = hourly.get("surface_pressure", [])
+                        winds = hourly.get("windspeed_10m", [])
+                        shortwaves = hourly.get("shortwave_radiation", [])
+                        directs = hourly.get("direct_radiation", [])
+                        dnis = hourly.get("direct_normal_irradiance", [])
+                        
+                        df_beta = pd.DataFrame({
+                            "Time": times,
+                            "Temperature (°C)": temps,
+                            "Relative Humidity (%)": rhums,
+                            "Pressure (hPa)": pressures,
+                            "Wind Speed (m/s)": [w * 1000 / 3600 if w is not None else 0 for w in winds], # Convert km/h to m/s if necessary, but Open-Meteo returns km/h by default unless specified. Wait, let's just request m/s or convert. Default is km/h.
+                            "Shortwave Rad (W/m²)": shortwaves,
+                            "Direct Rad (W/m²)": directs,
+                            "DNI (W/m²)": dnis
+                        })
+                        
+                        # Open-Meteo windspeed_10m default unit is km/h. We must convert to m/s for Liljegren.
+                        df_beta["Wind Speed (m/s)"] = df_beta["Wind Speed (m/s)"] * (1000 / 3600)
+                        
+                        df_beta = df_beta.dropna()
+                        
+                        if df_beta.empty:
+                            st.warning("No complete data returned for the selected dates.")
+                        else:
+                            # Calculate Simple WBGT
+                            df_beta["WBGT Simple (°C)"] = calculate_wbgt_celsius(
+                                df_beta["Temperature (°C)"],
+                                df_beta["Relative Humidity (%)"]
+                            )
+                            
+                            # Calculate Liljegren WBGT and UTCI
+                            wbgt_lil, utci_calc = calculate_advanced_indices(
+                                df_beta["Temperature (°C)"],
+                                df_beta["Relative Humidity (%)"],
+                                df_beta["Pressure (hPa)"],
+                                df_beta["Wind Speed (m/s)"],
+                                df_beta["Shortwave Rad (W/m²)"],
+                                df_beta["Direct Rad (W/m²)"],
+                                df_beta["DNI (W/m²)"]
+                            )
+                            df_beta["WBGT Liljegren (°C)"] = wbgt_lil
+                            df_beta["UTCI (°C)"] = utci_calc
+                            
+                            # Display
+                            st.subheader("Results")
+                            
+                            display_df = df_beta[["Time", "Temperature (°C)", "Relative Humidity (%)", "Shortwave Rad (W/m²)", "WBGT Simple (°C)", "WBGT Liljegren (°C)", "UTCI (°C)"]].copy()
+                            
+                            styled_beta = display_df.style.format({
+                                "Temperature (°C)": "{:.1f}",
+                                "Relative Humidity (%)": "{:.0f}",
+                                "Shortwave Rad (W/m²)": "{:.0f}",
+                                "WBGT Simple (°C)": "{:.1f}",
+                                "WBGT Liljegren (°C)": "{:.1f}",
+                                "UTCI (°C)": "{:.1f}"
+                            }).map(color_wbgt, subset=['WBGT Simple (°C)', 'WBGT Liljegren (°C)']).map(color_utci, subset=['UTCI (°C)'])
+                            
+                            st.dataframe(styled_beta, width='stretch', hide_index=True, height=600)
+                            
+                            st.line_chart(df_beta.set_index("Time")[["WBGT Simple (°C)", "WBGT Liljegren (°C)", "UTCI (°C)"]])
+                            
+                            st.caption("Source: Data powered by Open-Meteo. WBGT and UTCI calculations via Thermofeel.")
+                    else:
+                        st.error(f"Failed to fetch data from Open-Meteo. Status code: {response.status_code}")
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
