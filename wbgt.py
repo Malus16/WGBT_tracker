@@ -10,7 +10,7 @@ import thermofeel
 import requests
 import re
 
-import time
+import time as pytime
 
 WORLD_CUP_GROUNDS = {
     'Atlanta': (33.7554, -84.4006),
@@ -36,7 +36,7 @@ def get_location_coordinates(location_name):
     if location_name in WORLD_CUP_GROUNDS:
         return WORLD_CUP_GROUNDS[location_name]
     try:
-        time.sleep(1.1)
+        pytime.sleep(1.1)
         geolocator = geopy.geocoders.Nominatim(user_agent="wbgt_app_mikke", timeout=10)
         location = geolocator.geocode(location_name)
         if location:
@@ -304,7 +304,7 @@ with tab1:
                                     "Relative Humidity (%)": "{:.0f}",
                                     "WBGT (°C)": "{:.1f}"
                                 }).map(color_wbgt, subset=['WBGT (°C)'])
-                                st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600)
+                                st.dataframe(styled_df, width='stretch', hide_index=True, height=600)
                                 
                                 st.line_chart(df['WBGT (°C)'])
                                 
@@ -347,12 +347,12 @@ with tab2:
                     "Relative Humidity (%)": "{:.0f}",
                     "WBGT (°C)": "{:.1f}"
                 }).map(color_wbgt, subset=['WBGT (°C)'])
-                st.dataframe(styled_wc, use_container_width=True, hide_index=True, height=800)
+                st.dataframe(styled_wc, width='stretch', hide_index=True, height=800)
                 st.caption("Source: Meteostat and its data providers. Match schedule from openfootball.")
                 
             st.subheader("Weather Stations Used")
             st.write("For played matches, weather data is fetched from the nearest active weather station to the stadium at the time of the kickoff.")
-            st.dataframe(df_stations, use_container_width=True, hide_index=True, height=600)
+            st.dataframe(df_stations, width='stretch', hide_index=True, height=600)
             
         with wc_tab2:
             if df_forecast.empty:
@@ -364,5 +364,5 @@ with tab2:
                     "Relative Humidity (%)": "{:.0f}",
                     "WBGT (°C)": "{:.1f}"
                 }).map(color_wbgt, subset=['WBGT (°C)'])
-                st.dataframe(styled_forecast, use_container_width=True, hide_index=True, height=800)
+                st.dataframe(styled_forecast, width='stretch', hide_index=True, height=800)
                 st.caption("Source: Weather forecast data by [Open-Meteo.com](https://open-meteo.com/) (CC-BY 4.0). Match schedule from openfootball.")
